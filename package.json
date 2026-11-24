@@ -1,0 +1,13 @@
+{
+  "name": "car-service-dashboard",
+  "private": true,
+  "description": "Car service KPI dashboard (Vegas Car / Grab) as one self-contained HTML file",
+  "scripts": {
+    "build": "python3 build.py",
+    "build:cdn": "python3 build.py --cdn"
+  },
+  "dependencies": {
+    "chart.js": "4.4.1",
+    "xlsx": "0.18.5"
+  }
+}
