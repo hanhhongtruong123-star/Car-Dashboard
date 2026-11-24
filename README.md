@@ -17,7 +17,7 @@ Requirements: Python 3 with `openpyxl`, Node.js (only to download Chart.js and S
 ```bash
 npm install
 pip install openpyxl
-python3 build.py                              # sample data  -> dist/index.html
+python3 build.py                              # sample data  -> dist/index.html (open it in a browser)
 python3 build.py --data data/private          # your real files (stay local)
 python3 build.py --cdn                        # smaller file; loads libraries from cdnjs when opened
 ```
@@ -45,8 +45,15 @@ src/app.js          parsing, KPIs and charts
 build.py            builds dist/index.html
 data/sample/        fake demo data (safe to publish)
 templates/          Excel template for the driver roster
-.github/workflows/  publishes the sample build to GitHub Pages
+index.html          demo build (sample data) served by GitHub Pages
 ```
 
 ## Demo link (GitHub Pages)
-Repository **Settings → Pages → Source: GitHub Actions**. Each push to `main` rebuilds the demo from `data/sample/` and publishes it at `https://<owner>.github.io/<repo>/`.
+`index.html` in the repository root is the demo, built from the **fake** sample data.
+Turn it on once: repository **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main` / `(root)` → Save**.
+After 1–2 minutes the demo is live at `https://<owner>.github.io/<repo>/`.
+
+After changing the code, rebuild the demo and commit it:
+```bash
+python3 build.py --data data/sample --out index.html
+```
