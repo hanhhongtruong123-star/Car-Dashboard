@@ -7,7 +7,6 @@
 const CFG = {
   // Grab is hidden while the focus is Vegas Car. Owner/editors switch it in the Admin panel (saved for everyone on the hosted page).
   features: { grab: false },
-  hostTeams: ['HM','CM','IM','BD','GM','Non-Assigned'],
   teamDrivers: 18,            // Analysis C39
   dedicatedDrivers: ['35'],   // boss's dedicated driver, excluded from the guest pool
   offDays: 3, cycleDays: 14,  // min off days per 2 weeks
@@ -17,6 +16,7 @@ const CFG = {
   fleet: 9,                   // active guest fleet (vehicles)
   retiredCars: ['Benz S400','Benz S500'], // no longer in use (owner, Nov 2026): kept in history and cost, left out of fleet KPIs
   internalCars: ['Bus'],      // internal use only: left out of fleet KPIs
+  nationalities: ['KR','O.V','CN','JP','SG','TW','MY'], // owner: nationalities shown on their own in every nationality chart; all others = Other
   bannedTiers: ['X'],         // tier code X = banned guest
   grabMonthlyLimit: 300,      // USD: a guest whose Grab cost passes this in one calendar month is shown in red
   serviceWindow: 16,          // vehicle service window (h/day)
@@ -223,16 +223,9 @@ function indexRoster(){ ROSTER_IDX=new Map(); ROSTER_DAYS=new Set();
   // the cost sheet may spell a car differently from the trip log (SEDONA / Sedona): use the trip-log spelling
   const cars=new Map(); for(const t of S.trips) if(t.src==='V'&&!cars.has(t.car.toLowerCase())) cars.set(t.car.toLowerCase(),t.car);
   for(const c of S.costs){ const k=cars.get(c.car.toLowerCase()); if(k) c.car=k; }
-  // guard (security team) = Arrangby; the name comes from the Confirm column and applies to every month the ID appears in
-  GUARD_NAMES=new Map(); for(const t of S.trips) if(t.host&&t.hname&&!GUARD_NAMES.has(t.host)) GUARD_NAMES.set(t.host,t.hname);
 }
-let GUARD_NAMES=new Map();
-const guardName = id => GUARD_NAMES.has(id)? `${GUARD_NAMES.get(id)} (${id})` : 'Guard '+id;
-// PLACEHOLDER (owner, Nov 2026): real host-team data comes later. Until then every Vegas guest trip is given a random host team
-// (stable: the same trip always lands in the same team). A "Host Team" column in an uploaded trip log replaces it automatically.
-const HOST_PLACEHOLDER_NOTE = 'Placeholder data: each Vegas Car guest trip is assigned to a host team at random until the real host-team data is uploaded.';
-const driverName = id => { const n=S.drivers&&S.drivers[id]; if(!n) return id!=null?'Driver '+id:'–';
-  return Object.entries(S.drivers).some(([k,v])=>k!==String(id)&&String(v).toLowerCase()===n.toLowerCase())? n+' ('+id+')' : n; }; // two drivers share a name: add the ID
+// owner: driver names in CAPITALS everywhere, no employee ID shown
+const driverName = id => { const n=S.drivers&&S.drivers[id]; return n? String(n).trim().toUpperCase() : id!=null? 'DRIVER '+id : '–'; };
 const shiftHours = r => r.off?0:(r.e-r.s)/60;
 const availHours = r => r.off?0:Math.max(0,shiftHours(r)-(r.brk==null?CFG.breakH:r.brk));
 // the rostered shift a trip belongs to: same day or a night shift that started the day before (30-min grace either side)
@@ -574,31 +567,20 @@ function mkChart(id, type, labels, datasets, o){
 }
 
 // Guest trips by Nationality: top 9 nationalities + Other, as share of guest trips (shared by Overview and Customers)
-// donut: top 7 nationalities + Other (8 slices = the categorical palette), largest first, clockwise.
-// Wide cards label the slices around the ring; narrow cards (list:true) show a clean ring plus a legend list underneath.
-function natChart(id, guests, P, opt){
-  const nat=topN(countBy(guests,t=>t.nat||'Unknown'),7), tot=guests.length, list=opt&&opt.list;
-  mkChart(id,'doughnut',nat.map(x=>x[0]),[{data:nat.map(x=>x[1]),backgroundColor:nat.map(x=>colorFor('nat',x[0],P))}],list?{unit:'guest trips'}:{unit:'guest trips',pctLabels:'name'});
-  const el=document.getElementById(id+'-legend');
-  if(el) el.innerHTML=nat.map(([n,v])=>`<div class="lg-row"><i class="dot" style="background:${colorFor('nat',n,P)}"></i><span class="lg-name">${esc(n)}</span><span class="lg-pct num">${fmt.pct(tot?v/tot:null)}</span><span class="lg-n num">${fmt.int(v)}</span></div>`).join('');
+// donut: top 7 nationalities + Other (8 slices = the categorical palette), largest first, clockwise, slices labelled around the ring
+const natGroup = t => CFG.nationalities.includes(t.nat)? t.nat : 'Other';
+const byCountOtherLast = (keys,cnt) => keys.sort((a,b)=>(a==='Other')-(b==='Other')||cnt(b)-cnt(a));
+function natChart(id, guests, P){
+  const c=countBy(guests,natGroup), nat=byCountOtherLast([...c.keys()],k=>c.get(k)).map(k=>[k,c.get(k)]);
+  mkChart(id,'doughnut',nat.map(x=>x[0]),[{data:nat.map(x=>x[1]),backgroundColor:nat.map(x=>colorFor('nat',x[0],P))}],{unit:'guest trips',pctLabels:'name'});
 }
 // Trips by main area (city) — shared by Overview (all trips) and Customers (guest trips)
 function areaChart(id, trips, P){
   const ar=countBy(trips,areaOf);
   mkChart(id,'bar',CFG.areas,[{label:'Trips',data:CFG.areas.map(a=>ar.get(a)||0)}],{horizontal:true,unit:'trips',thick:40});
 }
-// Value that reveals the guests behind it on hover/tap, as a small table (top 15 by trips)
-function hovList(valueHtml, trips, title){
-  if(!trips||!trips.length) return `<span class="v">${valueHtml}</span>`;
-  const rows=[...groupBy(trips,t=>t.gid)].map(([gid,ts])=>({gid,n:ts.length,tier:ts[0].tier||'–',nat:ts[0].nat||'–'})).sort((a,b)=>b.n-a.n);
-  const body=rows.slice(0,15).map(r=>`<tr><td>${esc(r.gid)}</td><td>${esc(r.tier)}</td><td>${esc(r.nat)}</td><td class="r">${fmt.int(r.n)}</td></tr>`).join('');
-  const html=`<div class="tt-h"><b>${esc(title)}</b><span>${fmt.int(rows.length)} guest${rows.length>1?'s':''} · ${fmt.int(trips.length)} trips</span></div>
-    <table class="tt"><thead><tr><th>Guest ID</th><th>Tier</th><th>Nationality</th><th class="r">Trips</th></tr></thead><tbody>${body}</tbody></table>
-    ${rows.length>15?`<div class="tt-f">Top 15 shown · ${fmt.int(rows.length-15)} more guests</div>`:''}`;
-  return `<span class="v hov" tabindex="0" data-tiphtml="${esc(html)}">${valueHtml}</span>`;
-}
-const natBody = (id, guests, h=330, list=false) => `<div style="height:${h}px;position:relative">${canvas(id).replace('class="chart "',`class="chart" style="height:${h}px"`)}
-  <div style="position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center"><div><div class="big num" style="font-size:26px">${fmt.int(guests)}</div><div class="muted" style="font-size:11px">guest trips</div></div></div></div>${list?`<div class="legend-list" id="${id}-legend"></div>`:''}`;
+const natBody = (id, guests, h=330) => `<div style="height:${h}px;position:relative">${canvas(id).replace('class="chart "',`class="chart" style="height:${h}px"`)}
+  <div style="position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center"><div><div class="big num" style="font-size:26px">${fmt.int(guests)}</div><div class="muted" style="font-size:11px">guest trips</div></div></div></div>`;
 
 /* ============================ UI atoms ============================ */
 const ICON = {
@@ -627,16 +609,17 @@ function deltaHtml(cur, prev, pc){
   if(prev==null||!isFinite(prev)||cur==null||!isFinite(cur)) return `<span class="muted">vs ${esc(pc.cmpLabel)}: –</span>`;
   if(prev===0) return `<span class="muted">vs ${esc(pc.cmpLabel)}: new</span>`;
   const ch=(cur-prev)/Math.abs(prev), arrow=ch>0.0005?'↑':ch<-0.0005?'↓':'→';
-  return `<b>${arrow} ${fmt.pct(Math.abs(ch))}</b> vs ${esc(pc.cmpLabel)}`;
+  return `<b class="${arrow==='↑'?'up':arrow==='↓'?'down':''}">${arrow} ${fmt.pct(Math.abs(ch))}</b> vs ${esc(pc.cmpLabel)}`; // owner: increase green, decrease red
 }
 // KPI definitions are evaluated on current AND comparison context -> one code path for every module
 function kpiRow(defs, pc, cls){
   return `<section class="grid kpis ${cls||''}">${defs.map((k,i)=>{
     const v=k.get(pc.cur), p=pc.cmp?k.get(pc.cmp):null;
-    return `<div class="glass kpi"><div class="chip" style="background:var(--chip-${(i%4)+1})">${svg(k.icon)}</div>
-      <div class="k-body"><div class="k-label">${esc(k.label)}</div>
+    // owner: no explanation line under a KPI; the note stays available on hover
+    return `<div class="glass kpi"${k.note?` title="${esc(String(k.note(pc.cur)).replace(/<[^>]*>/g,''))}"`:''}><div class="chip" style="background:var(--chip-${(i%4)+1})">${svg(k.icon)}</div>
+      <div class="k-body"><div class="k-label" title="${esc(k.label)}">${esc(k.label)}</div>
       <div class="k-val num${typeof v==='string'?' txt':''}">${(k.fmt||fmt.int)(v)}${k.unit?`<small>${k.unit}</small>`:''}</div>
-      <div class="k-delta">${k.noCompare?'':deltaHtml(v,p,pc)}</div>${k.note?`<div class="k-note">${k.note(pc.cur)}</div>`:''}</div></div>`;
+      <div class="k-delta">${k.noCompare?'&nbsp;':deltaHtml(v,p,pc)}</div></div></div>`;
   }).join('')}</section>`;
 }
 function card(title, desc, body, opts){
@@ -714,7 +697,7 @@ function renderOverview(pc, after){
       <div class="stat-row"><span class="l">Max sustainable trips / day</span><span class="v num">≈ ${fmt.int(cap.max)}</span></div>
       <div class="stat-row"><span class="l">Binding constraint</span><span class="v">${cap.constraint}</span></div>`)
     : card('Vegas Car capacity','', `<div class="ph">No Vegas Car trips in this selection</div>`);
-  const mixCard = card('Trip mix', 'Service and customer group', `
+  const mixCard = card('Trips By Tiers', 'Service and customer group', `
       <div style="height:270px;position:relative">${canvas('ovDonut','short').replace('class="chart short"','class="chart" style="height:270px"')}
         <div style="position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center"><div><div class="big num" style="font-size:26px">${fmt.int(c.trips.length)}</div><div class="muted" style="font-size:11px">trips</div></div></div></div>
       ${grpNames.map(n=>`<div class="stat-row"><span class="l"><i class="dot" style="background:${levelColor(n,P)}"></i>${n}<span class="muted" style="font-size:11px">${n==='Internal Group'||n==='Other'?'':n==='Banned Guest'?CFG.bannedTiers.join(', '):(CFG.levels.find(l=>l[0]===n)[1].join(', '))}</span></span><span class="v num">${fmt.int(grp.get(n)||0)} <span style="display:inline-block;min-width:52px;text-align:right;color:var(--accent)">${fmt.pct(c.trips.length?(grp.get(n)||0)/c.trips.length:null)}</span></span></div>`).join('')}
@@ -722,7 +705,7 @@ function renderOverview(pc, after){
 
   const html = kpiRow(defs,pc) + `
     <section class="grid g-2-1">
-      ${card('Trips over time', `Trips per ${trendBuckets(c,[]).unit} · ${esc(c.label)}`, canvas('ovTrend','tall'), {cls:'fill', right:`<span class="badge">${esc(S.f.service==='all'?'All services':S.f.service==='V'?'Vegas Car':'Grab')}</span>`})}
+      ${card('Trips per Month', 'Every month with data · service and trip type filters apply', canvas('ovTrend','tall'), {cls:'fill', right:`<span class="badge">${esc(S.f.service==='all'?'All services':S.f.service==='V'?'Vegas Car':'Grab')}</span>`})}
       <div class="stack">${mixCard}</div>
     </section>
     <section class="grid g-3">
@@ -731,15 +714,18 @@ function renderOverview(pc, after){
       ${capCard}
     </section>
     <section class="grid g-2">
-      ${card('Trips by area','Main areas by city · Ho Chi Minh includes airport trips · Others = OutSide, Long An, Tay Ninh, Vung Tau…', canvas('ovDest','tall'))}
-      ${card('Guest trips by Nationality','Share of guest trips by nationality', natBody('ovNat',c.trips.filter(t=>t.type==='Guest').length))}
+      ${card('Trips by area','Main areas by city · Ho Chi Minh includes airport trips · Others = OutSide, Tay Ninh, Vung Tau…', canvas('ovDest','tall'))}
+      ${card('Guest trips by Nationality','', natBody('ovNat',c.trips.filter(t=>t.type==='Guest').length))}
     </section>`;
   after.push(()=>{
-    const tb=trendBuckets(c,c.trips), P=palette();
-    const pts=tb.labels.length<=31; // markers on daily/weekly/monthly points; hourly view stays a clean line
-    const datasets=[{label:'Trips',data:tb.vals,color:P.s[6],area:true,points:pts}];
-    if(S.f.service==='all' && c.grab.length){ const v=trendBuckets(c,c.vegas), g=trendBuckets(c,c.grab); datasets.splice(0,1,{label:'Vegas Car',data:v.vals,color:P.s[0],area:true,points:pts},{label:'Grab',data:g.vals,color:P.s[2],area:true,points:pts}); }
-    mkChart('ovTrend','line',tb.labels,datasets,{legend:datasets.length>1,unit:'trips'});
+    // owner: trips per calendar month over all data (not only the selected period); service and trip-type filters still apply
+    const P=palette(), svc=S.f.service, tt=effTtype(), ok=t=>tt==='all'||t.type===tt;
+    const months=uniq(S.trips.map(t=>t.d.slice(0,7))).sort(), mLabel=m=>MON[+m.slice(5)-1]+' '+m.slice(2,4);
+    const perMonth=src=>{ const n=countBy(S.trips.filter(t=>(!src||t.src===src)&&ok(t)),t=>t.d.slice(0,7)); return months.map(m=>n.get(m)||0); };
+    const datasets=svc==='all'&&S.trips.some(t=>t.src==='G')&&CFG.features.grab
+      ? [{label:'Vegas Car',data:perMonth('V'),color:P.s[0],area:true,points:true},{label:'Grab',data:perMonth('G'),color:P.s[2],area:true,points:true}]
+      : [{label:'Trips',data:perMonth(svc==='all'?null:svc),color:P.s[6],area:true,points:true}];
+    mkChart('ovTrend','line',months.map(mLabel),datasets,{legend:datasets.length>1,unit:'trips'});
     // donut: one slice per tier (shades of its level colour); the table below stays grouped by level
     const tierKey=t=>t.type==='Internal'?'Internal':(t.tier||'Unknown'), tc=countBy(c.trips,tierKey);
     const known=CFG.tierRank;
@@ -778,7 +764,7 @@ function renderVehicles(pc, after){
   const defs=[
     {label:'Active vehicles', icon:'car', get:activeCars, note:()=>`guest fleet · model: ${CFG.fleet} cars`},
     {label:'Hours on the road', icon:'clock', unit:'h', get:x=>sum(x.vegasAll,hrs)},
-    {label:'Avg hours / vehicle / day', icon:'gauge', fmt:fmt.d1, unit:'h', get:x=>{const n=activeCars(x); return n&&x.days?sum(fleetTrips(x),hrs)/n/x.days:null;}, note:()=>'guest fleet'},
+    {label:'Avg Hour/Car / day', icon:'gauge', fmt:fmt.d1, unit:'h', get:x=>{const n=activeCars(x); return n&&x.days?sum(fleetTrips(x),hrs)/n/x.days:null;}, note:()=>'guest fleet'},
     {label:'Fleet utilization', icon:'chart', fmt:fmt.pct, get:x=>{const n=activeCars(x); return n&&x.days?sum(fleetTrips(x),hrs)/n/x.days/CFG.serviceWindow:null;}, note:()=>`guest fleet · share of ${CFG.serviceWindow}h service window`},
     {label:'Peak cars in use', icon:'star', fmt:fmt.d1, get:peak, note:()=>'avg distinct cars, busiest hour'},
     {label:'Total km', icon:'globe', unit:'km', get:x=>sum(x.vegasAll,t=>t.km)},
@@ -823,58 +809,51 @@ const topN_ = (key,def) => { const v=S.extra[key]; return v==='all'?Infinity:(+v
 const topNSel = (key,def) => { const cur=S.extra[key]||String(def);
   return `<select class="sel" data-extra="${key}" aria-label="Number of rows">${TOPN_OPTS.map(n=>`<option value="${n}" ${cur===String(n)?'selected':''}>Top ${n}</option>`).join('')}<option value="all" ${cur==='all'?'selected':''}>All</option></select>`; };
 const topTitle = (key,def,what) => { const n=topN_(key,def); return (n===Infinity?'All ':'Top '+n+' ')+what; };
-function guestTable(rows, hide){ // hide: column keys left out of this table
+const tpgStats = ts => { const n=[...countBy(ts,t=>t.gid).values()]; return n.length?{minTpg:Math.min(...n), maxTpg:Math.max(...n)}:{minTpg:null,maxTpg:null}; }; // fewest / most trips by one guest
+function guestTable(rows){
   return table([
     {k:'rank',label:'#',r:1},{k:'gid',label:'Guest ID'},{k:'tier',label:'Tier'},{k:'nat',label:'Nationality'},
-    {k:'trips',label:'Guest Trips',r:1,f:fmt.int},{k:'km',label:'Total KM',r:1,f:fmt.int},{k:'hours',label:'Total Hours',r:1,f:fmt.d1},{k:'car',label:'Most used vehicle'},{k:'dest',label:'Top city / province'}].filter(c=>!(hide||[]).includes(c.k)), rows,{maxH:520});
+    {k:'trips',label:'Guest Trips',r:1,f:fmt.int},{k:'km',label:'Total KM',r:1,f:fmt.int},{k:'hours',label:'Total Hours',r:1,f:fmt.d1},{k:'car',label:'Most used vehicle'},{k:'dest',label:'Top city / province'}], rows,{maxH:520});
 }
 function guestRows(trips, by, n){
   const g=groupBy(trips,t=>t.gid);
   const rows=[...g].map(([gid,ts])=>({gid, tier:topKey(countBy(ts,t=>t.tier||'–')), nat:topKey(countBy(ts,t=>t.nat||'–')), trips:ts.length, km:sum(ts,t=>t.km), hours:sum(ts,hrs), car:topKey(countBy(ts,t=>t.car)), dest:topKey(countBy(ts,t=>t.city))}));
   rows.sort((a,b)=>b[by]-a[by]||b.trips-a.trips); return rows.slice(0,n).map((r,i)=>Object.assign(r,{rank:i+1}));
 }
-// Host team = team that booked the trip. Guest trips on Vegas Car only.
-// team of a trip: real team (Host Team column, or an Arrangby value that is a team name), else a stable random team (placeholder)
-const realTeamOf = t => { const v=(t.team||'').trim(), h=(t.host||'').trim();
-  const hit=CFG.hostTeams.find(x=>x.toLowerCase()===v.toLowerCase())||CFG.hostTeams.find(x=>x.toLowerCase()===h.toLowerCase()); return hit||null; };
-const SIM_TEAMS = CFG.hostTeams.filter(x=>x!=='Non-Assigned');
-const simTeam = t => { let h=2166136261; for(const ch of t.gid+'|'+t.d+'|'+t.dep+'|'+t.car) h=Math.imul(h^ch.charCodeAt(0),16777619); return SIM_TEAMS[(h>>>0)%SIM_TEAMS.length]; };
-const teamOf = t => realTeamOf(t) || simTeam(t);
-function hostSection(g){
-  const vg=g.filter(t=>t.src==='V');
-  if(!vg.length) return '';
-  const placeholder=vg.some(t=>!realTeamOf(t));
-  const top2=ts=>[...countBy(ts,t=>t.tier||'–')].sort((a,b)=>b[1]-a[1]).slice(0,2).map(([k,n])=>`${k} (${fmt.int(n)})`).join(', ');
-  const stats=ts=>({trips:ts.length, guests:uniq(ts.map(t=>t.gid)).length, km:sum(ts,t=>t.km), hours:sum(ts,hrs), tiers:top2(ts)});
-  const byTeam=groupBy(vg,teamOf);
-  const rows=CFG.hostTeams.filter(tm=>byTeam.has(tm)).map(team=>Object.assign({team},stats(byTeam.get(team))));
-  const foot=Object.assign({team:'Total'},stats(vg));
-  let sel=S.extra.custHost||'__all';
-  if(!(sel==='__all'||(sel.startsWith('team:')&&byTeam.has(sel.slice(5))))) sel='__all';
-  const selTrips=sel==='__all'?vg:byTeam.get(sel.slice(5));
-  const selName=sel==='__all'?'all host teams':'team '+sel.slice(5);
-  const note=placeholder?`<span class="badge" title="${esc(HOST_PLACEHOLDER_NOTE)}">Placeholder data</span>`:'';
-  const pnote=placeholder?`<p class="muted" style="font-size:11.5px;margin:10px 0 0">⚠ ${esc(HOST_PLACEHOLDER_NOTE)}</p>`:'';
-  const options=`<option value="__all" ${sel==='__all'?'selected':''}>All host teams · ${fmt.int(vg.length)} trips</option>`+
-    rows.map(r=>`<option value="team:${esc(r.team)}" ${sel==='team:'+r.team?'selected':''}>Team ${esc(r.team)} · ${fmt.int(r.trips)} trips</option>`).join('');
-  return `
-    ${card('Trips Booked by Host Team',placeholder?'Vegas Car guest trips by host team (simulated)':'Vegas Car guest trips booked by each host team', table([
-      {k:'team',label:'Host team'},{k:'trips',label:'Guest Trips',r:1,f:fmt.int},{k:'guests',label:'Guests',r:1,f:fmt.int},
-      {k:'km',label:'Total KM',r:1,f:fmt.int},{k:'hours',label:'Total Hours',r:1,f:fmt.d1},{k:'tiers',label:'Top Tiers'}], rows, {foot,maxH:560})+pnote, {right:note})}
-    ${card('Guests by host team',`All ${fmt.int(uniq(selTrips.map(t=>t.gid)).length)} guests served by ${esc(selName)} · ${fmt.int(selTrips.length)} guest trips · ranked by trips`, guestTable(guestRows(selTrips,'trips',Infinity),['nat'])+(placeholder?`<p class="muted" style="font-size:11.5px;margin:10px 0 0">⚠ Placeholder: host teams are assigned at random.</p>`:''),
-      {right:`<select class="sel" data-extra="custHost" aria-label="Host team">${options}</select>`})}
-    ${guardSection(vg)}`;
-}
-// Guests by guard: guard = Arrangby (security team member who took the booking and dispatched the car)
-function guardSection(vg){
-  const byGuard=groupBy(vg.filter(t=>t.host),t=>t.host); if(!byGuard.size) return '';
-  const all=[...byGuard.values()].flat(), guards=[...byGuard].sort((a,b)=>b[1].length-a[1].length);
-  let sel=S.extra.custGuard||'__all'; if(sel!=='__all'&&!byGuard.has(sel)) sel='__all';
-  const ts=sel==='__all'?all:byGuard.get(sel), who=sel==='__all'?'all guards':guardName(sel);
-  const options=`<option value="__all" ${sel==='__all'?'selected':''}>All guards · ${fmt.int(all.length)} trips</option>`+
-    guards.map(([id,x])=>`<option value="${esc(id)}" ${sel===id?'selected':''}>${esc(guardName(id))} · ${fmt.int(x.length)} trips</option>`).join('');
-  return card('Guests by guard',`Guard = Arrangby (security team) · all ${fmt.int(uniq(ts.map(t=>t.gid)).length)} guests handled by ${esc(who)} · ${fmt.int(ts.length)} guest trips · ranked by trips`,
-    guestTable(guestRows(ts,'trips',Infinity),['nat']), {right:`<select class="sel" data-extra="custGuard" aria-label="Guard">${options}</select>`});
+// One "Analysis By …" block for a guest dimension (tier, nationality): trips chart + usage table,
+// destination split + total km + total hours, km per guest. Same layout and charts for every dimension.
+function dimSection(g, o){
+  const by=groupBy(g,o.keyOf), cnt=k=>by.get(k).length, keys=o.order([...by.keys()],cnt), id=o.id;
+  const rows=keys.map(k=>{const ts=by.get(k), u=uniq(ts.map(t=>t.gid)).length; return {key:k, group:o.group?o.group(k):null, guests:u, trips:ts.length, share:ts.length/g.length, tpg:ts.length/u, km:sum(ts,t=>t.km), hours:sum(ts,hrs), ...tpgStats(ts)};});
+  const u=uniq(g.map(t=>t.gid)).length;
+  const html=`
+    <div class="section-title">${esc(o.head)}</div>
+    <section class="grid g-1-2">
+      ${card(o.t.trips[0],o.t.trips[1], canvas(id+'Trips'))}
+      ${card(o.t.usage[0],o.t.usage[1], table([
+        {k:'key',label:o.keyLabel},...(o.group?[{k:'group',label:o.keyLabel+' Group',html:r=>`<span class="pill">${esc(r.group)}</span>`}]:[]),{k:'guests',label:'Guests',r:1,f:fmt.int},{k:'trips',label:'Trips',r:1,f:fmt.int},
+        {k:'share',label:'Share',r:1,f:fmt.pct},{k:'tpg',label:'Avg Trips/Guest',r:1,f:fmt.d1},{k:'minTpg',label:'Min Trips/Guest',r:1,f:fmt.int},{k:'maxTpg',label:'Max Trips/Guest',r:1,f:fmt.int}], rows,
+        {foot:{key:'Total',guests:u,trips:g.length,share:g.length?1:null,tpg:u?g.length/u:null,...tpgStats(g)}}))}
+    </section>
+    <section class="grid g-3">
+      ${card(o.t.area,'', canvas(id+'Area'))}
+      ${card(o.t.km,'', canvas(id+'Km'))}
+      ${card(o.t.hours,'', canvas(id+'H'))}
+    </section>
+    ${card(o.t.kmg[0],o.t.kmg[1], canvas(id+'KmG','tall'))}`;
+  const draw=P=>{
+    mkChart(id+'Trips','bar',keys,[{label:'Guest trips',data:rows.map(r=>r.trips),color:P.s[0]}],{unit:'trips'});
+    mkChart(id+'Km','line',keys,[{label:'Guest km',data:rows.map(r=>r.km),color:P.s[1],points:true}],{unit:'km'});
+    mkChart(id+'H','line',keys,[{label:'Guest hours',data:rows.map(r=>r.hours),color:P.s[2],points:true}],{unit:'h',fmt:fmt.d1});
+    // one bar per destination area, stacked by key (e.g. Binh Duong: 100 I, 50 V, 10 EC …); unique guests next to each area
+    const areaGuests=a=>uniq(g.filter(t=>areaOf(t)===a).map(t=>t.gid)).length;
+    mkChart(id+'Area','bar',CFG.areas.map(a=>`${a} · ${fmt.int(areaGuests(a))} guests`),keys.map(k=>({label:k,color:o.color(k,P),data:CFG.areas.map(a=>by.get(k).filter(t=>areaOf(t)===a).length)})),{horizontal:true,stacked:true,legend:true,unit:'trips'});
+    // km of each guest within the key -> average across guests (bars) and the single highest guest (line)
+    const kmPerGuest=keys.map(k=>[...groupBy(by.get(k),t=>t.gid).values()].map(ts=>sum(ts,t=>t.km)));
+    mkChart(id+'KmG','bar',keys,[{label:'Avg km per guest',color:P.s[0],order:1,data:kmPerGuest.map(v=>v.length?sum(v)/v.length:0)},
+      {type:'line',label:'Max km (top guest)',color:P.s[1],order:0,points:true,data:kmPerGuest.map(v=>v.length?Math.max(...v):0)}],{legend:true,fmt:fmt.int,unit:'km'});
+  };
+  return {html, draw};
 }
 function renderCustomers(pc, after){
   const c=pc.cur; const G=x=>x.trips.filter(t=>t.type==='Guest');
@@ -888,57 +867,31 @@ function renderCustomers(pc, after){
     {label:'Avg hours / guest trip', icon:'clock', fmt:fmt.d2, unit:'h', get:x=>G(x).length?sum(G(x),hrs)/G(x).length:null, note:x=>G(x).length?`≈ ${fmt.int(sum(G(x),t=>t.dur)/G(x).length)} min per trip`:''},
   ];
   const g=G(c);
-  const tiers=groupBy(g,t=>t.tier||'Unknown'), tk=sortTiers([...tiers.keys()]);
-  const tierRows=tk.map(k=>{const ts=tiers.get(k), u=uniq(ts.map(t=>t.gid)).length; return {tier:k, group:levelOf(k).replace(' Level',''), guests:u, trips:ts.length, share:ts.length/g.length, tpg:ts.length/u, km:sum(ts,t=>t.km), avgKm:sum(ts,t=>t.km)/ts.length, topNat:topKey(countBy(ts,t=>t.nat||'–'))};});
-  const byTpg=[...tierRows].sort((a,b)=>b.tpg-a.tpg);
+  // the same analysis block, once per dimension (owner: tiers, then nationalities right below)
+  const dims=[
+    dimSection(g,{id:'cuT', head:'Analysis By Tiers', keyOf:t=>t.tier||'Unknown', order:ks=>sortTiers(ks), color:tierColor, keyLabel:'Tier',
+      group:k=>levelOf(k).replace(' Level',''),
+      t:{trips:['Guest trips by tier','Number of guest trips per membership tier'], usage:['Usage intensity by tier','Trips and guests per tier · tiers from highest (EC) to lowest (P), then X'],
+         area:'Guest tiers by destination', km:'Total Km By Tiers', hours:'Total Hours By Tiers', kmg:['Km per guest by tier','Average km per guest vs the guest with the most km in each tier']}}),
+    dimSection(g,{id:'cuN', head:'Analysis By Nationality', keyOf:natGroup, order:byCountOtherLast, color:(k,P)=>colorFor('nat',k,P), keyLabel:'Nationality',
+      t:{trips:['Guest trips by nationality','Number of guest trips per nationality · ' + CFG.nationalities.join(', ') + ', the rest in Other'], usage:['Usage intensity by nationality','Trips and guests per nationality · most trips first'],
+         area:'Guest nationalities by destination', km:'Total Km By Nationalities', hours:'Total Hours By Nationalities', kmg:['Km per guest by nationality','Average km per guest vs the guest with the most km in each nationality']}}),
+  ];
   const cars=uniq(c.trips.map(t=>t.car)).sort();
   const selCar=S.extra.custCar&&cars.includes(S.extra.custCar)?S.extra.custCar:cars[0];
   const topBy=S.extra.custTopBy||'trips';
 
   const html = kpiRow(defs,pc,'six') + `
-    <section class="grid g-3">
-      ${card('Guest trips by tier','Number of guest trips per membership tier', canvas('cuTier'))}
-      ${card('Guest trips by Nationality','Share of guest trips by nationality', natBody('cuNat',g.length,210,true))}
-      ${card('Guest trips by Destination',CFG.areas.join(', ').replace('Ho Chi Minh','Ho Chi Minh (incl. airport)'), canvas('cuCity'))}
-    </section>
-    <section class="grid g-2-1">
-      ${card('Usage intensity by tier','Who uses the service most / least — sorted by trips per guest', table([
-        {k:'tier',label:'Tier'},{k:'group',label:'Tier Group',html:r=>`<span class="pill">${r.group}</span>`},{k:'guests',label:'Guests',r:1,f:fmt.int},{k:'trips',label:'Trips',r:1,f:fmt.int},
-        {k:'share',label:'Share',r:1,f:fmt.pct},{k:'tpg',label:'Trips/guest',r:1,f:fmt.d1},{k:'avgKm',label:'Avg km/trip',r:1,f:fmt.d1},{k:'topNat',label:'Top nationality'}], byTpg,
-        {foot:(()=>{const u=uniq(g.map(t=>t.gid)).length; return {tier:'Total',guests:u,trips:g.length,share:g.length?1:null,tpg:u?g.length/u:null,avgKm:g.length?sum(g,t=>t.km)/g.length:null,topNat:topKey(countBy(g,t=>t.nat||'–'))};})()}))}
-      ${card('Most & least active tiers','By trips per guest · hover a value to see the guests in that group', `
-        <div class="stat-row"><span class="l">Most active tier</span>${hovList(byTpg[0]?`${esc(byTpg[0].tier)} · ${fmt.d1(byTpg[0].tpg)} trips/guest`:'–', byTpg[0]&&g.filter(t=>t.tier===byTpg[0].tier), byTpg[0]&&'Tier '+byTpg[0].tier)}</div>
-        <div class="stat-row"><span class="l">Least active tier</span>${(()=>{const r=byTpg[byTpg.length-1]; return hovList(r?`${esc(r.tier)} · ${fmt.d1(r.tpg)} trips/guest`:'–', r&&g.filter(t=>t.tier===r.tier), r&&'Tier '+r.tier);})()}</div>
-        <div class="stat-row"><span class="l">Largest tier by trips</span>${(()=>{const r=tierRows.slice().sort((a,b)=>b.trips-a.trips)[0]; return hovList(r?esc(r.tier):'–', r&&g.filter(t=>t.tier===r.tier), r&&'Tier '+r.tier);})()}</div>
-        <div class="stat-row"><span class="l">Top nationality</span>${(()=>{const n=topKey(countBy(g,t=>t.nat||'–')); return hovList(n?esc(n):'–', n&&g.filter(t=>(t.nat||'–')===n), n&&'Nationality '+n);})()}</div>
-        <div class="stat-row"><span class="l">Repeat guests (≥ 5 trips)</span>${(()=>{const c=countBy(g,t=>t.gid); return hovList(fmt.int([...c.values()].filter(v=>v>=5).length), g.filter(t=>c.get(t.gid)>=5), 'Repeat guests (≥ 5 trips)');})()}</div>
-        <div class="stat-row"><span class="l">One-time guests</span>${(()=>{const c=countBy(g,t=>t.gid); return hovList(fmt.int([...c.values()].filter(v=>v===1).length), g.filter(t=>c.get(t.gid)===1), 'One-time guests');})()}</div>`)}
-    </section>
+    ${dims.map(d=>d.html).join('')}
     ${card('Peak usage time','Guest trips starting by weekday × hour · '+esc(c.label), `<div id="cuHeat"></div>`)}
-    ${card('Guest tiers by destination','Guest trips to each main area, split by customer tier · distinct guests next to each area · hover a colour to see the trips of that tier', canvas('cuArea','short')+(S.extra.destTable!=='show'?'':
-      table([{k:'area',label:'Destination'},...tk.map(k=>({k:'t_'+k,label:k,r:1,f:v=>v?fmt.int(v):'–'})),{k:'total',label:'Total trips',r:1,f:fmt.int},{k:'guests',label:'Guests',r:1,f:fmt.int}],
-        CFG.areas.map(a=>{ const ts=g.filter(t=>areaOf(t)===a), o={area:a,total:ts.length,guests:uniq(ts.map(t=>t.gid)).length}; tk.forEach(k=>o['t_'+k]=ts.filter(t=>(t.tier||'Unknown')===k).length); return o; }).filter(r=>r.total),
-        {foot:Object.assign({area:'Total',total:g.length,guests:uniq(g.map(t=>t.gid)).length},...tk.map(k=>({['t_'+k]:tiers.get(k).length})))})),
-      {right:`<div class="seg" data-extra="destTable"><button type="button" class="${S.extra.destTable!=='show'?'on':''}" data-v="hide">Hide table</button><button type="button" class="${S.extra.destTable==='show'?'on':''}" data-v="show">Show table</button></div>`})}
-    ${card('Km per guest by tier','Average km per guest vs the guest with the most km in each tier', canvas('cuAreaKm','tall'))}
     <section class="grid g-2">
       ${card(topTitle('custTopN',50,'guests'), 'Ranked across all vehicles', guestTable(guestRows(g,topBy,topN_('custTopN',50))), {right:topNSel('custTopN',50)+`<div class="seg" data-extra="custTopBy">${[['trips','By trips'],['km','By km'],['hours','By hours']].map(([k,l])=>`<button type="button" class="${topBy===k?'on':''}" data-v="${k}">${l}</button>`).join('')}</div>`})}
       ${card(topTitle('custCarN',10,'guests per vehicle'), 'Ranked by trips', guestTable(guestRows(g.filter(t=>t.car===selCar),'trips',topN_('custCarN',10))), {right:topNSel('custCarN',10)+`<select class="sel" data-extra="custCar" aria-label="Vehicle">${cars.map(x=>`<option ${x===selCar?'selected':''}>${esc(x)}</option>`).join('')}</select>`})}
     </section>
-    ${hostSection(g)}
 `;
   after.push(()=>{
     const P=palette();
-    mkChart('cuTier','bar',tk,[{label:'Guest trips',data:tierRows.map(r=>r.trips),color:P.s[0]}],{unit:'trips'});
-    natChart('cuNat',g,P,{list:true});
-    areaChart('cuCity',g,P);
-    // one bar per destination area, stacked by tier (e.g. Binh Duong: 100 I, 50 V, 10 EC …)
-    const areaGuests=a=>uniq(g.filter(t=>areaOf(t)===a).map(t=>t.gid)).length;
-    mkChart('cuArea','bar',CFG.areas.map(a=>`${a} · ${fmt.int(areaGuests(a))} guests`),tk.map(k=>({label:k,color:tierColor(k,P),data:CFG.areas.map(a=>tiers.get(k).filter(t=>areaOf(t)===a).length)})),{horizontal:true,stacked:true,legend:true,unit:'trips'});
-    // per tier: km of each guest (sum of their trips in that tier) -> average across guests, and the highest single guest
-    const kmPerGuest=tk.map(k=>[...groupBy(tiers.get(k),t=>t.gid).values()].map(ts=>sum(ts,t=>t.km)));
-    mkChart('cuAreaKm','bar',tk,[{label:'Avg km per guest',color:P.s[0],order:1,data:kmPerGuest.map(v=>v.length?sum(v)/v.length:0)},
-      {type:'line',label:'Max km (top guest)',color:P.s[1],order:0,points:true,data:kmPerGuest.map(v=>v.length?Math.max(...v):0)}],{legend:true,fmt:fmt.int,unit:'km'});
+    dims.forEach(d=>d.draw(P));
     const m=WD.map(()=>new Array(24).fill(0)); g.forEach(t=>m[weekday(t.d)][Math.floor(t.dep/60)%24]++);
     $('#cuHeat').innerHTML=heatmap(WD,[...Array(24).keys()].map(pad),m,fmt.int,'trips');
   });
@@ -972,8 +925,8 @@ function renderDrivers(pc, after){
   const defs=[
     {label:'Active pool drivers', icon:'users', get:x=>poolStats(x).length, note:()=>`team ${CFG.teamDrivers} incl. ${CFG.dedicatedDrivers.length} dedicated`},
     {label:'Avg shift-days worked', icon:'calendar', fmt:fmt.d1, get:x=>{const p=poolStats(x); return p.length?sum(p,d=>d.shiftDays)/p.length:null;}, note:x=>capacity(x)&&capacity(x).basis!=='estimate'?'per pool driver · rostered days':'per pool driver · days with trips'},
-    {label:'Avg driving h / shift-day', icon:'clock', fmt:fmt.d2, unit:'h', get:x=>{const p=poolStats(x).filter(d=>d.shiftDays); return p.length?sum(p,d=>d.avgSd)/p.length:null;}},
-    {label:'Use of available driving time', icon:'gauge', fmt:fmt.pct, get:x=>{const p=poolStats(x), av=sum(p,d=>d.avail); return av?sum(p,d=>d.hours)/av:null;}, note:x=>{const k=capacity(x); return !k?'':k.basis==='roster'?'from actual shifts':k.basis==='mixed'?`actual shifts on ${k.rosterDays} of ${x.days} days`:'estimated (6h per shift-day)';}},
+    {label:'Avg drive hour / shift-day', icon:'clock', fmt:fmt.d2, unit:'h', get:x=>{const p=poolStats(x).filter(d=>d.shiftDays); return p.length?sum(p,d=>d.avgSd)/p.length:null;}},
+    {label:'Driving time used', icon:'gauge', fmt:fmt.pct, get:x=>{const p=poolStats(x), av=sum(p,d=>d.avail); return av?sum(p,d=>d.hours)/av:null;}, note:x=>{const k=capacity(x); return !k?'':k.basis==='roster'?'from actual shifts':k.basis==='mixed'?`actual shifts on ${k.rosterDays} of ${x.days} days`:'estimated (6h per shift-day)';}},
     {label:'Capacity used', icon:'chart', fmt:fmt.pct, get:x=>{const k=capacity(x); return k&&k.usedPct;}},
     {label:'Additional trips / day', icon:'route', get:x=>{const k=capacity(x); return k&&k.add;}, note:x=>{const k=capacity(x); return k?`max sustainable ≈ ${fmt.int(k.max)} trips/day`:'';}},
   ];
@@ -998,7 +951,7 @@ function renderDrivers(pc, after){
   const basisBadge=`<span class="badge">${!cap||cap.basis==='estimate'?'Shifts: estimated (no roster uploaded)':cap.basis==='roster'?'Shifts: actual roster':`Shifts: actual roster on ${cap.rosterDays} of ${c.days} days`}</span>`;
   const html = `<div class="section-title">Drivers ${vegasOnlyNote()} ${basisBadge}</div>` + kpiRow(defs,pc,'six') + `
     ${card('Driver scorecard',(anyRoster?'Shift-days = rostered working days (plus days with trips but no roster row) · use = driving h ÷ (shift length − break) · off-shift = trips outside the rostered shift':'Shift-day = trips before 05:30 count to the previous day\'s shift · use = driving h ÷ 6h per shift-day')+' · highlighted row = dedicated boss driver (excluded from pool averages)', table([
-      {k:'name',label:'Driver',html:r=>`${esc(r.name)} <span class="muted" style="font-size:11px">#${esc(r.drv)}</span>`+(r.dedicated?' <span class="pill">Dedicated</span>':'')},
+      {k:'name',label:'Driver',html:r=>esc(r.name)+(r.dedicated?' <span class="pill">Dedicated</span>':'')},
       {k:'shiftDays',label:'Shift-days',r:1,f:fmt.int},...(anyRoster?[{k:'offDays',label:'Days off',r:1,f:fmt.int},{k:'shiftH',label:'Shift h',r:1,f:fmt.d1}]:[]),
       {k:'trips',label:'Trips',r:1,f:fmt.int},{k:'tps',label:'Trips/shift-day',r:1,f:fmt.d1},
       {k:'hours',label:'Driving h',r:1,f:fmt.d1},{k:'avgSd',label:'Avg h/shift-day',r:1,f:fmt.d2},{k:'maxSd',label:'Max h/shift-day',r:1,f:fmt.d1},
@@ -1123,7 +1076,6 @@ const DEFS = [
   ['Days with data','Calendar days in the selected period that fall inside the data range. All "per day" averages divide by this number.'],
   ['Pool drivers','All Vegas drivers except the dedicated boss driver (ID 35). Pool averages and capacity exclude driver 35; the driver is still shown in the scorecard (highlighted).'],
   ['Main areas','Ho Chi Minh (all HCMC destinations, airport included), Binh Duong, Dong Nai, Long An, and Others (OutSide, Tay Ninh, Vung Tau and other provinces). Based on the CITY column.'],
-  ['Host team','Each Vegas Car guest trip is booked by a host team (HM, CM, IM, BD, GM). The team comes from a "Host Team" column in the trip log. Until that data is uploaded, every trip is assigned to a team at random (placeholder, marked "Placeholder data"); the same trip always stays in the same team.'],
   ['Driver roster','When a Driver Roster is uploaded, a driver\'s working days, available driving time (shift length − break) and the trips that fall inside each shift come from the roster: drivers on duty and driver capacity use the real roster on those days, rostered days without trips count, and trips outside the rostered shift are counted as off-shift. Days without a roster keep the estimate (13.4 drivers on duty × 6h, shift-day cut-off 05:30).'],
   ['Customer levels','VIP Level = ONE, ONE+, EC. Premium Level = I+, V, V+ (the tiers OD wants to extend the service to). Potential Level = P, I. Internal Group = staff and operational trips. X = banned guest (shown as Banned Guest, grey). Any other tier code shows as Other. Premium share is calculated on guest trips (internal excluded).'],
   ['Guest vs internal','Guest = customer trips. Internal = staff, boss and operational trips (fuel, maintenance, food…). Customer metrics use guest trips only; internal usage is shown as a separate group.'],
@@ -1305,10 +1257,11 @@ if(window.__ARTIFACT__){ // hosted page: browser downloads are blocked, so offer
   $('#btnSave').hidden=true;
   const t=document.querySelector('#modal p.muted'); if(t) t.textContent='Uploaded data is remembered in this browser only. To update the shared page for OD, send the new Excel file to the dashboard owner.';
 }
-if(!window.__ARTIFACT__){ S.adminOK=true; try{ if(localStorage.getItem(STORE_KEY+'.grab')==='1'){ CFG.features.grab=true; buildModules(); } }catch(_){} }
+// window.__VIEWER__ (public demo build): view-only like OD on the hosted page: no Admin, no uploads, no per-browser data
+if(!window.__ARTIFACT__&&!window.__VIEWER__){ S.adminOK=true; try{ if(localStorage.getItem(STORE_KEY+'.grab')==='1'){ CFG.features.grab=true; buildModules(); } }catch(_){} }
 loadSeed();
 SHARED.seed={trips:S.trips.slice(),costs:S.costs.slice(),roster:S.roster.slice(),drivers:Object.assign({},S.drivers),source:S.source};
-if(!window.__ARTIFACT__) loadLocal(); // offline file keeps per-browser uploads; hosted page uses the shared store
+if(!window.__ARTIFACT__&&!window.__VIEWER__) loadLocal(); // offline file keeps per-browser uploads; hosted page uses the shared store
 try{ const ui=JSON.parse(localStorage.getItem(STORE_KEY+'.ui')||'null'); if(ui){ Object.assign(S.f,ui.f||{}); S.mod=ui.mod||S.mod; S.extra=ui.extra||{}; } }catch(e){}
 const h=location.hash.slice(1); if(MODULES.some(m=>m.id===h)) S.mod=h;
 if(!MODULES.some(m=>m.id===S.mod)) S.mod='overview';

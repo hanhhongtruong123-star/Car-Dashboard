@@ -3,6 +3,7 @@
     python3 build.py                                  # sample data -> dist/index.html
     python3 build.py --data data/private              # your own Excel files (keep them out of git)
     python3 build.py --out dist/dashboard.html --cdn  # load Chart.js / SheetJS from cdnjs instead of inlining
+    python3 build.py --viewer --out index.html        # public demo: view-only, as viewers see the hosted dashboard
 
 Every sheet of every .xlsx in --data is embedded as built-in data; uploads in the page itself still work.
 Needs: Python 3 + openpyxl, and `npm install` once (Chart.js and SheetJS are read from node_modules)."""
@@ -13,6 +14,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--data', default=os.path.join(ROOT, 'data', 'sample'))
 ap.add_argument('--out', default=os.path.join(ROOT, 'dist', 'index.html'))
 ap.add_argument('--cdn', action='store_true', help='load libraries from cdnjs (smaller file, needs internet when opened)')
+ap.add_argument('--viewer', action='store_true', help='view-only page (no Admin / uploads), as viewers see the hosted dashboard; used for the public demo')
 a = ap.parse_args()
 
 EPOCH = datetime.datetime(1899, 12, 30)
@@ -43,6 +45,8 @@ if a.cdn:
 else:
     html = html.replace('/*__CHARTJS__*/', lib('chart.js/dist/chart.umd.js')).replace('/*__XLSX__*/', lib('xlsx/dist/xlsx.full.min.js'))
 html = html.replace('/*__SEED__*/', seed).replace('/*__APP__*/', src('app.js'))
+if a.viewer:
+    html = html.replace('<script id="seed"', '<script>window.__VIEWER__=1</script>\n<script id="seed"', 1)
 os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 open(a.out, 'w', encoding='utf-8').write(html)
 print(f'written {a.out} ({len(html)//1024} KB) from {len(files)} file(s), {len(sheets)} sheet(s)')

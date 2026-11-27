@@ -51,5 +51,6 @@ After 1–2 minutes the demo is live at `https://<owner>.github.io/<repo>/`.
 
 After changing the code, rebuild the demo and commit it:
 ```bash
-python3 build.py --data data/sample --out index.html
+python3 build.py --data data/sample --viewer --out index.html
 ```
+`--viewer` makes the demo view-only (no Admin / upload), exactly as viewers see the hosted dashboard.
