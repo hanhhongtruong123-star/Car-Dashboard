@@ -28,15 +28,11 @@ Every sheet of every `.xlsx` in `--data` becomes the built-in data. New files ca
 
 | File | Sheet / columns |
 |---|---|
-| VG Car trips | `GuestID, Type, Customer Tier` (or `Level`), `Nationality` (or `Nation`), `Date, Depart, Arrival, Occupancy, Distance, Arrangby, EmployeeId, Brand, Destination, CITY`; optional `Confirm` (guard name), `Host Team` |
+| VG Car trips | `GuestID, Type, Customer Tier` (or `Level`), `Nationality` (or `Nation`), `Date, Depart, Arrival, Occupancy, Distance, Arrangby, EmployeeId, Brand, Destination, CITY` |
 | Driver names | `EmployeeId, Name` (or `Driver Name`) |
 | Car cost | `Date, Car Brand, Cost Type, Amount (Usd)` (or `Date, Vehicle, Category, Amount (USD)`) |
 | Grab | sheet name contains `Grab`; trip columns plus `Grab $` and `Hour` |
 | Driver roster | `Date, EmployeeId, Start, End, Break, Status` — see `templates/Driver_Roster_Template.xlsx` |
-
-## Placeholders still in use
-- **Host team** split is simulated (each guest trip gets a random but stable team) until a `Host Team` column is supplied.
-- **Guard** = `Arrangby` (security team); the name comes from the `Confirm` column.
 
 ## Project layout
 ```
